@@ -20,7 +20,7 @@ void print_banner() {
 std::string get_os_name() {
 #if defined(_WIN32)
     return "Windows";
-#elif defined(__apple__) || defined(__MACH__)
+#elif defined(__APPLE__) || defined(__MACH__)
     return "macOS";
 #elif defined(__linux__)
     // 尝试读取发行版信息

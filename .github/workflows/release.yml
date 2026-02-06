@@ -10,7 +10,8 @@ on:
   workflow_dispatch: # 支持手动点击按钮触发
 
 jobs:
-  build:
+  # ==================== 通用平台构建 ====================
+  build-native:
     name: Build for ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -21,19 +22,19 @@ jobs:
           - os: windows-latest
             arch: x64
             artifact_name: sysinfo-windows-amd64.exe
-          
-          # Linux x64
+
+          # Linux x64 (通用: Ubuntu, Debian)
           - os: ubuntu-latest
             arch: x64
             artifact_name: sysinfo-linux-amd64
-          
-          # Linux ARM64 (通过交叉编译)
+
+          # Linux ARM64 (通用: Ubuntu, Debian - 通过交叉编译)
           - os: ubuntu-latest
             arch: arm64
             artifact_name: sysinfo-linux-arm64
             cross_compile: true
 
-          # macOS (Apple Silicon)
+          # macOS ARM64 (Apple Silicon M1/M2/M3/M4)
           - os: macos-latest
             arch: arm64
             artifact_name: sysinfo-macos-arm64
@@ -97,9 +98,199 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact_name }}
 
+  # ==================== EL7 构建任务 (CentOS 7 / RHEL 7) ====================
+  build-el7:
+    name: Build EL7 (CentOS 7 / RHEL 7) - ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+        distro: [centos7, rhel7]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Docker Image
+        id: docker_image
+        shell: bash
+        run: |
+          if [ "${{ matrix.distro }}" = "centos7" ]; then
+            echo "image=centos:7" >> $GITHUB_OUTPUT
+            echo "prefix=sysinfo-centos7" >> $GITHUB_OUTPUT
+          else
+            echo "image=redhat/ubi7" >> $GITHUB_OUTPUT
+            echo "prefix=sysinfo-rhel7" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install QEMU for ARM64
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static
+
+      - name: Build in Docker (x64)
+        if: matrix.arch == 'x64'
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace ${{ steps.docker_image.outputs.image }} bash -c "
+            yum install -y cmake3 gcc-c++ make &&
+            mkdir -p build && cd build &&
+            cmake3 -DCMAKE_BUILD_TYPE=Release .. &&
+            make &&
+            cd .. && mkdir -p dist &&
+            cp build/bin/hello_world dist/${{ steps.docker_image.outputs.prefix }}-amd64
+          "
+
+      - name: Build in Docker (ARM64)
+        if: matrix.arch == 'arm64'
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            --platform linux/arm64 \
+            ${{ steps.docker_image.outputs.image }} bash -c "
+            yum install -y cmake3 gcc-c++ make &&
+            mkdir -p build && cd build &&
+            cmake3 -DCMAKE_BUILD_TYPE=Release .. &&
+            make &&
+            cd .. && mkdir -p dist &&
+            cp build/bin/hello_world dist/${{ steps.docker_image.outputs.prefix }}-arm64
+          "
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.docker_image.outputs.prefix }}-${{ matrix.arch }}
+          path: dist/${{ steps.docker_image.outputs.prefix }}-${{ matrix.arch }}
+
+  # ==================== EL8 构建任务 (CentOS 8 / RHEL 8) ====================
+  build-el8:
+    name: Build EL8 (CentOS 8 / RHEL 8) - ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+        distro: [centos8, rhel8]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Docker Image
+        id: docker_image
+        shell: bash
+        run: |
+          if [ "${{ matrix.distro }}" = "centos8" ]; then
+            echo "image=centos:8" >> $GITHUB_OUTPUT
+            echo "prefix=sysinfo-centos8" >> $GITHUB_OUTPUT
+          else
+            echo "image=redhat/ubi8" >> $GITHUB_OUTPUT
+            echo "prefix=sysinfo-rhel8" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install QEMU for ARM64
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static
+
+      - name: Build in Docker (x64)
+        if: matrix.arch == 'x64'
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace ${{ steps.docker_image.outputs.image }} bash -c "
+            dnf install -y cmake gcc-c++ make &&
+            mkdir -p build && cd build &&
+            cmake -DCMAKE_BUILD_TYPE=Release .. &&
+            make &&
+            cd .. && mkdir -p dist &&
+            cp build/bin/hello_world dist/${{ steps.docker_image.outputs.prefix }}-amd64
+          "
+
+      - name: Build in Docker (ARM64)
+        if: matrix.arch == 'arm64'
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            --platform linux/arm64 \
+            ${{ steps.docker_image.outputs.image }} bash -c "
+            dnf install -y cmake gcc-c++ make &&
+            mkdir -p build && cd build &&
+            cmake -DCMAKE_BUILD_TYPE=Release .. &&
+            make &&
+            cd .. && mkdir -p dist &&
+            cp build/bin/hello_world dist/${{ steps.docker_image.outputs.prefix }}-arm64
+          "
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.docker_image.outputs.prefix }}-${{ matrix.arch }}
+          path: dist/${{ steps.docker_image.outputs.prefix }}-${{ matrix.arch }}
+
+  # ==================== EL9 构建任务 (CentOS Stream 9 / RHEL 9) ====================
+  build-el9:
+    name: Build EL9 (CentOS Stream 9 / RHEL 9) - ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+        distro: [centos9, rhel9]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set Docker Image
+        id: docker_image
+        shell: bash
+        run: |
+          if [ "${{ matrix.distro }}" = "centos9" ]; then
+            echo "image=quay.io/centos/centos:stream9" >> $GITHUB_OUTPUT
+            echo "prefix=sysinfo-centos9" >> $GITHUB_OUTPUT
+          else
+            echo "image=redhat/ubi9" >> $GITHUB_OUTPUT
+            echo "prefix=sysinfo-rhel9" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install QEMU for ARM64
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static
+
+      - name: Build in Docker (x64)
+        if: matrix.arch == 'x64'
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace ${{ steps.docker_image.outputs.image }} bash -c "
+            dnf install -y cmake gcc-c++ make &&
+            mkdir -p build && cd build &&
+            cmake -DCMAKE_BUILD_TYPE=Release .. &&
+            make &&
+            cd .. && mkdir -p dist &&
+            cp build/bin/hello_world dist/${{ steps.docker_image.outputs.prefix }}-amd64
+          "
+
+      - name: Build in Docker (ARM64)
+        if: matrix.arch == 'arm64'
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            --platform linux/arm64 \
+            ${{ steps.docker_image.outputs.image }} bash -c "
+            dnf install -y cmake gcc-c++ make &&
+            mkdir -p build && cd build &&
+            cmake -DCMAKE_BUILD_TYPE=Release .. &&
+            make &&
+            cd .. && mkdir -p dist &&
+            cp build/bin/hello_world dist/${{ steps.docker_image.outputs.prefix }}-arm64
+          "
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.docker_image.outputs.prefix }}-${{ matrix.arch }}
+          path: dist/${{ steps.docker_image.outputs.prefix }}-${{ matrix.arch }}
+
+  # ==================== 创建 GitHub Release ====================
   publish:
     name: Create GitHub Release
-    needs: build
+    needs: [build-native, build-el7, build-el8, build-el9]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -117,10 +308,39 @@ jobs:
           files: ./artifacts/*
           body: |
             ## System Info Tool Release
-            此版本由 GitHub Actions 自动构建，支持以下架构：
-            - Windows x64
-            - Linux x64 / ARM64
-            - macOS ARM64 (Apple Silicon)
+
+            此版本由 GitHub Actions 自动构建，支持以下平台：
+
+            ### Windows
+            - Windows x64 (AMD64)
+
+            ### Linux 通用版本
+            - Linux x64 (Ubuntu, Debian 等)
+            - Linux ARM64 (Ubuntu, Debian 等)
+
+            ### CentOS / RHEL 企业版
+            - CentOS 7 / RHEL 7 (x64, ARM64)
+            - CentOS 8 / RHEL 8 (x64, ARM64)
+            - CentOS Stream 9 / RHEL 9 (x64, ARM64)
+
+            ### macOS
+            - macOS ARM64 (Apple Silicon M1/M2/M3/M4)
+
+            ### 产物命名说明
+            所有产物使用 `sysinfo-<platform>-<arch>` 格式命名，例如：
+            - `sysinfo-linux-amd64` - Linux x64 通用版本
+            - `sysinfo-centos7-amd64` - CentOS 7 x64 专用版本
+            - `sysinfo-rhel9-arm64` - RHEL 9 ARM64 专用版本
+            - `sysinfo-macos-arm64` - macOS Apple Silicon 通用版本
+
+            ### 使用方法
+            下载对应平台的二进制文件后，赋予执行权限并运行：
+            ```bash
+            chmod +x sysinfo-*
+            ./sysinfo-*
+            ```
+
+            Windows 用户直接双击 `.exe` 文件即可。
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
