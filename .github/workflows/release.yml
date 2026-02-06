@@ -1,0 +1,126 @@
+name: Cross-Platform Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+        - main
+  workflow_dispatch: # 支持手动点击按钮触发
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x64
+          - os: windows-latest
+            arch: x64
+            artifact_name: sysinfo-windows-amd64.exe
+          
+          # Linux x64
+          - os: ubuntu-latest
+            arch: x64
+            artifact_name: sysinfo-linux-amd64
+          
+          # Linux ARM64 (通过交叉编译)
+          - os: ubuntu-latest
+            arch: arm64
+            artifact_name: sysinfo-linux-arm64
+            cross_compile: true
+
+          # macOS (Apple Silicon)
+          - os: macos-latest
+            arch: arm64
+            artifact_name: sysinfo-macos-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- 环境准备 ---
+      - name: Install Dependencies (Linux ARM64)
+        if: matrix.cross_compile
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-aarch64-linux-gnu qemu-user-static
+
+      # --- 编译步骤 ---
+      - name: Configure CMake
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross_compile }}" = "true" ]; then
+            cmake -B build \
+              -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+              -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+              -DCMAKE_BUILD_TYPE=Release
+          else
+            cmake -B build -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      # --- 自动化测试 ---
+      - name: Test (Native)
+        if: (!matrix.cross_compile)
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            ./build/bin/Release/hello_world.exe
+          else
+            ./build/bin/hello_world
+          fi
+
+      - name: Test (Linux ARM64 via QEMU)
+        if: matrix.cross_compile
+        run: qemu-aarch64-static ./build/bin/hello_world
+
+      # --- 整理产物 ---
+      - name: Prepare Artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            cp build/bin/Release/hello_world.exe dist/${{ matrix.artifact_name }}
+          else
+            cp build/bin/hello_world dist/${{ matrix.artifact_name }}
+          fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}
+
+  publish:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Display structure of downloaded files
+        run: ls -R ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./artifacts/*
+          body: |
+            ## System Info Tool Release
+            此版本由 GitHub Actions 自动构建，支持以下架构：
+            - Windows x64
+            - Linux x64 / ARM64
+            - macOS ARM64 (Apple Silicon)
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
